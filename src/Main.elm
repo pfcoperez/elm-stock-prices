@@ -7,7 +7,12 @@ import Html.Events exposing (..)
 import Time exposing (..)
 
 main =
-  Browser.sandbox { init = init, update = update, view = view }
+  Browser.element
+    { init = init
+    , subscriptions = subscriptions
+    , update = update
+    , view = view
+    }
 
 -- MODEL
 
@@ -36,22 +41,29 @@ type alias State =
     values : List Value
   }
 
-init : State
-init = {
-  symbolSelector = "",
-  apiKey = Nothing,
-  values = []
+init : () -> (State, Cmd Msg)
+init () = (
+  { symbolSelector = ""
+  , apiKey = Nothing
+  , values = []
   }
+  , Cmd.none
+  ) 
 
 -- UPDATE
 
 type Msg = Subscribe | Unsubscribe String | SelectorChange String
 
-update : Msg -> State -> State
+update : Msg -> State -> (State, Cmd Msg)
 update msg model = case msg of
-  SelectorChange newSelector -> { model | symbolSelector = newSelector }
-  Subscribe -> { model | symbolSelector = "", values = model.values ++ [ newValue model.symbolSelector ] }
-  Unsubscribe symbol -> { model | values = List.filter (\value -> value.symbol /= symbol) model.values }
+  SelectorChange newSelector -> ({ model | symbolSelector = newSelector }, Cmd.none)
+  Subscribe -> ({ model | symbolSelector = "", values = model.values ++ [ newValue model.symbolSelector ] }, Cmd.none)
+  Unsubscribe symbol -> ({ model | values = List.filter (\value -> value.symbol /= symbol) model.values }, Cmd.none)
+
+-- SUBSCRIPTIONS
+
+subscriptions : State -> Sub Msg
+subscriptions _ = Sub.none
 
 -- VIEW
 
