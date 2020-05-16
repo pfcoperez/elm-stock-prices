@@ -1,10 +1,12 @@
 port module Main exposing (main)
 
 import Browser
-import Html exposing (Html, table, tr, th, td, text, button, div, input)
+import Html exposing (Html, table, tr, th, td, text, button, div, input, br)
 import Html.Attributes exposing (..)
 import Html.Events exposing (..)
 import Time exposing (..)
+import Json.Decode exposing (float, string, int, decodeValue, map4, field, list)
+import Json.Encode
 
 main =
   Browser.element
@@ -17,7 +19,7 @@ main =
 -- Low level WS ports
 
 port sendMessage : String -> Cmd msg
-port messageReceiver : (String -> msg) -> Sub msg
+port messageReceiver : (Json.Encode.Value -> msg) -> Sub msg
 
 -- MODEL
 
@@ -65,13 +67,16 @@ subscribeJson symbol =
     subscriptionJson = "{\"type\":\"subscribe\",\"symbol\":\"" ++ symbol ++ "\"}"
   in subscriptionJson
 
+unsubscribeJson : String -> String
+unsubscribeJson symbol = "{\"type\":\"unsubscribe\",\"symbol\":\"" ++ symbol ++ "\"}"
+
 -- UPDATE
 
 type Msg
   = Subscribe
   | Unsubscribe String
   | SelectorChange String
-  | Receive String
+  | Receive Json.Encode.Value
 
 addWsLogEntry : List String -> String -> List String
 addWsLogEntry currentLog newEntry = newEntry :: List.take 9 currentLog
@@ -83,9 +88,23 @@ update msg model = case msg of
     let
       subsCommand = sendMessage (subscribeJson model.symbolSelector)
     in ({ model | symbolSelector = "", values = model.values ++ [ newValue model.symbolSelector ] }, subsCommand)
-  Unsubscribe symbol -> ({ model | values = List.filter (\value -> value.symbol /= symbol) model.values }, Cmd.none)
+  Unsubscribe symbol -> 
+    let
+      unsubsCommand = sendMessage (unsubscribeJson model.symbolSelector)
+    in ({ model | values = List.filter (\value -> value.symbol /= symbol) model.values }, unsubsCommand)
   -- Port messages
-  Receive value -> ({model | wsLog = addWsLogEntry model.wsLog value }, Cmd.none)
+  Receive json ->
+    let jsonAsStr = Json.Encode.encode 0 json
+    in case decodeValue valuesDecoder json of
+      Ok receivedValues ->
+        let updateValue value = value -- if value.symbol == receivedValue.symbol then receivedValue else value  
+        in ({model | wsLog = addWsLogEntry model.wsLog jsonAsStr, values = receivedValues}, Cmd.none)
+      Err err ->
+        let
+          m = case err of
+            Json.Decode.Failure problem _ -> problem
+            _ -> ""
+        in ({model | wsLog = addWsLogEntry model.wsLog ("ERROR: " ++ m ++ " " ++ jsonAsStr)}, Cmd.none)
 
 -- SUBSCRIPTIONS
 
@@ -113,8 +132,8 @@ valueRow { symbol, current, volume, timestamp } =
     td [] [ text symbol ],
     td [] [ text (textValue String.fromFloat current) ],
     td [] [ text (textValue String.fromFloat volume) ],
-    td [] [ text (textValue timeToUTCStr timestamp) ],
-    td [] [ button [ onClick (Unsubscribe symbol) ] [ text "Unsubscribe" ] ]
+    td [] [ text (textValue timeToUTCStr timestamp) ] --,
+    -- td [] [ button [ onClick (Unsubscribe symbol) ] [ text "Unsubscribe" ] ]
   ]
 
 valuesTableHeader : Html Msg
@@ -138,12 +157,26 @@ addSymbolView currentSelector =
     ]
 
 logView : List String -> Html Msg
-logView entries = div [] (List.map text entries)
+logView entries = div [] (List.map (\entry -> div [] [text entry, br [] []]) entries)
 
 view : State -> Html Msg
 view { values, symbolSelector, wsLog } = 
   div [] [
     addSymbolView symbolSelector,
-    valuesTable values,
+    valuesTable (List.sortBy (\v -> v.symbol) values),
     logView wsLog
   ]
+
+valueDecoder : Json.Decode.Decoder Value
+valueDecoder =
+  let
+    builder : String -> Float -> Float -> Int -> Value
+    builder symbol price volume millis = Value symbol True (Just price) (Just volume) (Just (Time.millisToPosix millis))
+  in map4 builder
+    (field "s" string)
+    (field "p" float)
+    (field "v" float)
+    (field "t" int)
+
+valuesDecoder : Json.Decode.Decoder (List Value)
+valuesDecoder = field "data" (Json.Decode.list valueDecoder)

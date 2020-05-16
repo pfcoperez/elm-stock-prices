@@ -27,7 +27,8 @@
     
     socket.addEventListener("message", function(event) {
         console.log("Passing response to elm: " + event.data)
-	    app.ports.messageReceiver.send(event.data);
+        var parsed = JSON.parse(event.data);
+	    app.ports.messageReceiver.send(parsed);
     });
 
     </script>
