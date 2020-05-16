@@ -7,6 +7,7 @@ import Html.Events exposing (..)
 import Time exposing (..)
 import Json.Decode exposing (float, string, int, decodeValue, map4, field, list)
 import Json.Encode
+import Dict exposing (Dict)
 
 main =
   Browser.element
@@ -45,7 +46,7 @@ type alias State =
   { 
     symbolSelector : String,
     apiKey : Maybe String,
-    values : List Value,
+    values : Dict String Value,
     wsLog: List String
   }
 
@@ -53,7 +54,7 @@ init : () -> (State, Cmd Msg)
 init () = (
   { symbolSelector = ""
   , apiKey = Nothing
-  , values = []
+  , values = Dict.empty
   , wsLog = [ "Init" ]
   },
   Cmd.none
@@ -87,18 +88,22 @@ update msg model = case msg of
   Subscribe ->
     let
       subsCommand = sendMessage (subscribeJson model.symbolSelector)
-    in ({ model | symbolSelector = "", values = model.values ++ [ newValue model.symbolSelector ] }, subsCommand)
+    in ({ model | symbolSelector = "", values = Dict.insert model.symbolSelector (newValue model.symbolSelector) model.values }, subsCommand)
   Unsubscribe symbol -> 
-    let
-      unsubsCommand = sendMessage (unsubscribeJson model.symbolSelector)
-    in ({ model | values = List.filter (\value -> value.symbol /= symbol) model.values }, unsubsCommand)
+    --let
+    --  unsubsCommand = sendMessage (unsubscribeJson model.symbolSelector)
+    -- in ({ model | values = List.filter (\value -> value.symbol /= symbol) model.values }, unsubsCommand)
+    (model, Cmd.none)
   -- Port messages
   Receive json ->
     let jsonAsStr = Json.Encode.encode 0 json
     in case decodeValue valuesDecoder json of
       Ok receivedValues ->
-        let updateValue value = value -- if value.symbol == receivedValue.symbol then receivedValue else value  
-        in ({model | wsLog = addWsLogEntry model.wsLog jsonAsStr, values = receivedValues}, Cmd.none)
+        let
+          valuesUpdater : Value -> Dict String Value -> Dict String Value
+          valuesUpdater value current = Dict.insert value.symbol value current
+          updated = List.foldl valuesUpdater model.values receivedValues
+        in ({model | wsLog = addWsLogEntry model.wsLog jsonAsStr, values = updated}, Cmd.none)
       Err err ->
         let
           m = case err of
@@ -163,7 +168,7 @@ view : State -> Html Msg
 view { values, symbolSelector, wsLog } = 
   div [] [
     addSymbolView symbolSelector,
-    valuesTable (List.sortBy (\v -> v.symbol) values),
+    valuesTable (List.sortBy (\v -> v.symbol) (Dict.values values)),
     logView wsLog
   ]
 
