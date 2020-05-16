@@ -1,10 +1,13 @@
-module Main exposing (main)
+port module Main exposing (main)
 
 import Browser
-import Html exposing (Html, table, tr, th, td, text, button, div, input)
+import Html exposing (Html, table, tr, th, td, text, button, div, input, br)
 import Html.Attributes exposing (..)
 import Html.Events exposing (..)
 import Time exposing (..)
+import Json.Decode exposing (float, string, int, decodeValue, map4, field, list)
+import Json.Encode
+import Dict exposing (Dict)
 
 main =
   Browser.element
@@ -13,6 +16,11 @@ main =
     , update = update
     , view = view
     }
+
+-- Low level WS ports
+
+port sendMessage : String -> Cmd msg
+port messageReceiver : (Json.Encode.Value -> msg) -> Sub msg
 
 -- MODEL
 
@@ -38,32 +46,75 @@ type alias State =
   { 
     symbolSelector : String,
     apiKey : Maybe String,
-    values : List Value
+    values : Dict String Value,
+    wsLog: List String
   }
 
 init : () -> (State, Cmd Msg)
 init () = (
   { symbolSelector = ""
   , apiKey = Nothing
-  , values = []
-  }
-  , Cmd.none
+  , values = Dict.empty
+  , wsLog = [ "Init" ]
+  },
+  Cmd.none
   ) 
+
+-- Messages for WS port
+
+subscribeJson : String -> String
+subscribeJson symbol =
+  let
+    subscriptionJson = "{\"type\":\"subscribe\",\"symbol\":\"" ++ symbol ++ "\"}"
+  in subscriptionJson
+
+unsubscribeJson : String -> String
+unsubscribeJson symbol = "{\"type\":\"unsubscribe\",\"symbol\":\"" ++ symbol ++ "\"}"
 
 -- UPDATE
 
-type Msg = Subscribe | Unsubscribe String | SelectorChange String
+type Msg
+  = Subscribe
+  | Unsubscribe String
+  | SelectorChange String
+  | Receive Json.Encode.Value
+
+addWsLogEntry : List String -> String -> List String
+addWsLogEntry currentLog newEntry = newEntry :: List.take 9 currentLog
 
 update : Msg -> State -> (State, Cmd Msg)
 update msg model = case msg of
   SelectorChange newSelector -> ({ model | symbolSelector = newSelector }, Cmd.none)
-  Subscribe -> ({ model | symbolSelector = "", values = model.values ++ [ newValue model.symbolSelector ] }, Cmd.none)
-  Unsubscribe symbol -> ({ model | values = List.filter (\value -> value.symbol /= symbol) model.values }, Cmd.none)
+  Subscribe ->
+    let
+      subsCommand = sendMessage (subscribeJson model.symbolSelector)
+    in ({ model | symbolSelector = "", values = Dict.insert model.symbolSelector (newValue model.symbolSelector) model.values }, subsCommand)
+  Unsubscribe symbol -> 
+    --let
+    --  unsubsCommand = sendMessage (unsubscribeJson model.symbolSelector)
+    -- in ({ model | values = List.filter (\value -> value.symbol /= symbol) model.values }, unsubsCommand)
+    (model, Cmd.none)
+  -- Port messages
+  Receive json ->
+    let jsonAsStr = Json.Encode.encode 0 json
+    in case decodeValue valuesDecoder json of
+      Ok receivedValues ->
+        let
+          valuesUpdater : Value -> Dict String Value -> Dict String Value
+          valuesUpdater value current = Dict.insert value.symbol value current
+          updated = List.foldl valuesUpdater model.values receivedValues
+        in ({model | wsLog = addWsLogEntry model.wsLog jsonAsStr, values = updated}, Cmd.none)
+      Err err ->
+        let
+          m = case err of
+            Json.Decode.Failure problem _ -> problem
+            _ -> ""
+        in ({model | wsLog = addWsLogEntry model.wsLog ("ERROR: " ++ m ++ " " ++ jsonAsStr)}, Cmd.none)
 
 -- SUBSCRIPTIONS
 
 subscriptions : State -> Sub Msg
-subscriptions _ = Sub.none
+subscriptions _ = Sub.batch [ messageReceiver Receive ]
 
 -- VIEW
 
@@ -86,8 +137,8 @@ valueRow { symbol, current, volume, timestamp } =
     td [] [ text symbol ],
     td [] [ text (textValue String.fromFloat current) ],
     td [] [ text (textValue String.fromFloat volume) ],
-    td [] [ text (textValue timeToUTCStr timestamp) ],
-    td [] [ button [ onClick (Unsubscribe symbol) ] [ text "Unsubscribe" ] ]
+    td [] [ text (textValue timeToUTCStr timestamp) ] --,
+    -- td [] [ button [ onClick (Unsubscribe symbol) ] [ text "Unsubscribe" ] ]
   ]
 
 valuesTableHeader : Html Msg
@@ -110,9 +161,27 @@ addSymbolView currentSelector =
     button [ onClick Subscribe ] [ text "OK" ]
     ]
 
+logView : List String -> Html Msg
+logView entries = div [] (List.map (\entry -> div [] [text entry, br [] []]) entries)
+
 view : State -> Html Msg
-view { values, symbolSelector } = 
+view { values, symbolSelector, wsLog } = 
   div [] [
     addSymbolView symbolSelector,
-    valuesTable values
+    valuesTable (List.sortBy (\v -> v.symbol) (Dict.values values)),
+    logView wsLog
   ]
+
+valueDecoder : Json.Decode.Decoder Value
+valueDecoder =
+  let
+    builder : String -> Float -> Float -> Int -> Value
+    builder symbol price volume millis = Value symbol True (Just price) (Just volume) (Just (Time.millisToPosix millis))
+  in map4 builder
+    (field "s" string)
+    (field "p" float)
+    (field "v" float)
+    (field "t" int)
+
+valuesDecoder : Json.Decode.Decoder (List Value)
+valuesDecoder = field "data" (Json.Decode.list valueDecoder)
