@@ -1,5 +1,10 @@
 <html>
     <head>
+        <!-- CSS Style -->
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.8.2/css/bulma.min.css">
+        <script defer src="https://use.fontawesome.com/releases/v5.3.1/js/all.js"></script>
+        <!-- Load ELM -->
         <script type="text/javascript" src="elm.js"></script>
     </head>
     <body>
@@ -18,13 +23,13 @@
     // along to the WebSocket.
     app.ports.sendMessage.subscribe(function(message) {
         console.log("Got message from elm to rely to WS: " + message);
-        
+
         socket.send(message);
     });
 
     // When a message comes into our WebSocket, we pass the message along
     // to the `messageReceiver` port.
-    
+
     socket.addEventListener("message", function(event) {
         console.log("Passing response to elm: " + event.data)
         var parsed = JSON.parse(event.data);

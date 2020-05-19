@@ -151,22 +151,24 @@ valuesTableHeader =
   ]
 
 valuesTable : List Value -> Html Msg
-valuesTable values = table [] ([ valuesTableHeader ] ++ (List.map valueRow values))
+valuesTable values = table [ class "table" ] ([ valuesTableHeader ] ++ (List.map valueRow values))
 
 addSymbolView : String -> Html Msg
 addSymbolView currentSelector =
-  div [] [
+  div [ class "container" ] [
     text "Subscribe to: ",
-    input [ value currentSelector, onInput SelectorChange ] [],
-    button [ onClick Subscribe ] [ text "OK" ]
+    input [ value currentSelector, onInput SelectorChange, class "input is-primary" ] [],
+    button [ onClick Subscribe, class "button is-primary" ] [ text "OK" ]
     ]
 
 logView : List String -> Html Msg
-logView entries = div [] (List.map (\entry -> div [] [text entry, br [] []]) entries)
+logView entries = div [ class "footer" ] [
+  div [ class "content has-text-centered" ] (List.map (\entry -> div [ ] [text entry, br [] []]) entries)
+  ]
 
 view : State -> Html Msg
 view { values, symbolSelector, wsLog } = 
-  div [] [
+  div [ class "container" ] [
     addSymbolView symbolSelector,
     valuesTable (List.sortBy (\v -> v.symbol) (Dict.values values)),
     logView wsLog
