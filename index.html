@@ -16,24 +16,36 @@
 	    node: document.getElementById('myapp')
     });
 
-    // Create your WebSocket.
-    // var socket = new WebSocket('wss://echo.websocket.org');
-    var socket = new WebSocket('wss://ws.finnhub.io?token=');
+    var socket = null;
+
     // When a command goes to the `sendMessage` port, we pass the message
     // along to the WebSocket.
     app.ports.sendMessage.subscribe(function(message) {
         console.log("Got message from elm to rely to WS: " + message);
-
         socket.send(message);
     });
 
-    // When a message comes into our WebSocket, we pass the message along
-    // to the `messageReceiver` port.
+    app.ports.connectWithToken.subscribe(function(token) {
+        if(socket) {
+            try {
+                console.log("Closing previous connection");
+                socket.close();
+            } catch (error) {
+                ;
+            }
+        }
+        console.log("Connecting to Finnhub");
+        // Create WebSocket.
+        socket = new WebSocket('wss://ws.finnhub.io?token=' + token);
 
-    socket.addEventListener("message", function(event) {
-        console.log("Passing response to elm: " + event.data)
-        var parsed = JSON.parse(event.data);
-	    app.ports.messageReceiver.send(parsed);
+        // When a message comes into our WebSocket, we pass the message along
+        // to the `messageReceiver` port.
+
+        socket.addEventListener("message", function(event) {
+            console.log("Passing response to elm: " + event.data)
+            var parsed = JSON.parse(event.data);
+	        app.ports.messageReceiver.send(parsed);
+        });
     });
 
     </script>

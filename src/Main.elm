@@ -20,6 +20,7 @@ main =
 -- Low level WS ports
 
 port sendMessage : String -> Cmd msg
+port connectWithToken : String -> Cmd msg
 port messageReceiver : (Json.Encode.Value -> msg) -> Sub msg
 
 -- MODEL
@@ -43,7 +44,8 @@ newValue sym = {
   }
 
 type alias State = 
-  { 
+  {
+    token: String,
     symbolSelector : String,
     apiKey : Maybe String,
     values : Dict String Value,
@@ -52,7 +54,8 @@ type alias State =
 
 init : () -> (State, Cmd Msg)
 init () = (
-  { symbolSelector = ""
+  { token = ""
+  , symbolSelector = ""
   , apiKey = Nothing
   , values = Dict.empty
   , wsLog = [ "Init" ]
@@ -78,6 +81,8 @@ type Msg
   | Unsubscribe String
   | SelectorChange String
   | Receive Json.Encode.Value
+  | TokenChange String
+  | UseToken
 
 addWsLogEntry : List String -> String -> List String
 addWsLogEntry currentLog newEntry = newEntry :: List.take 9 currentLog
@@ -94,6 +99,11 @@ update msg model = case msg of
     --  unsubsCommand = sendMessage (unsubscribeJson model.symbolSelector)
     -- in ({ model | values = List.filter (\value -> value.symbol /= symbol) model.values }, unsubsCommand)
     (model, Cmd.none)
+  TokenChange newToken ->
+    ({ model | token = newToken }, Cmd.none)
+  UseToken ->
+    if String.isEmpty model.token then ( { model | wsLog = addWsLogEntry model.wsLog "ERROR: Empty token" }, Cmd.none) -- FIXME: Show a notification pop-up.
+    else ( { model | wsLog = addWsLogEntry model.wsLog ("Connecting using token: " ++ model.token) } , connectWithToken model.token)
   -- Port messages
   Receive json ->
     let jsonAsStr = Json.Encode.encode 0 json
@@ -169,11 +179,22 @@ logView entries = div [ class "footer" ] [
   div [ class "content has-text-centered" ] (List.map (\entry -> div [ ] [text entry, br [] []]) entries)
   ]
 
+tokenView : String -> Html Msg
+tokenView currentToken =
+  div [ class "field has-addons" ] [
+      div [ class "control" ] [
+        input [ value currentToken, onInput TokenChange, class "input is-primary" ] []
+      ],
+      div [ class "control" ] [
+        button [ onClick UseToken, class "button is-info" ] [ text "Connect" ]
+      ]
+    ]
+
 view : State -> Html Msg
-view { values, symbolSelector, wsLog } =
+view { values, symbolSelector, wsLog, token } =
   div [ class "columns" ] [
     div [ class "column is-one-fifth" ] [
-      text ""
+      tokenView token
     ],
     div [ class "column" ] [
       div [ class "container" ] [
