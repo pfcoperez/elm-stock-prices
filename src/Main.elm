@@ -155,10 +155,13 @@ valuesTable values = table [ class "table" ] ([ valuesTableHeader ] ++ (List.map
 
 addSymbolView : String -> Html Msg
 addSymbolView currentSelector =
-  div [ class "container" ] [
-    text "Subscribe to: ",
-    input [ value currentSelector, onInput SelectorChange, class "input is-primary" ] [],
-    button [ onClick Subscribe, class "button is-primary" ] [ text "OK" ]
+  div [ class "field has-addons" ] [
+    div [ class "control" ] [
+      input [ value currentSelector, onInput SelectorChange, class "input is-primary" ] []
+    ],
+    div [ class "control" ] [
+      button [ onClick Subscribe, class "button is-info" ] [ text "Subscribe to symbol" ]
+    ]
     ]
 
 logView : List String -> Html Msg
@@ -167,12 +170,19 @@ logView entries = div [ class "footer" ] [
   ]
 
 view : State -> Html Msg
-view { values, symbolSelector, wsLog } = 
-  div [ class "container" ] [
-    addSymbolView symbolSelector,
-    valuesTable (List.sortBy (\v -> v.symbol) (Dict.values values)),
-    logView wsLog
-  ]
+view { values, symbolSelector, wsLog } =
+  div [ class "columns" ] [
+    div [ class "column is-one-fifth" ] [
+      text ""
+    ],
+    div [ class "column" ] [
+      div [ class "container" ] [
+        addSymbolView symbolSelector,
+        valuesTable (List.sortBy (\v -> v.symbol) (Dict.values values)),
+        logView wsLog
+        ]
+      ]
+  ] 
 
 valueDecoder : Json.Decode.Decoder Value
 valueDecoder =
