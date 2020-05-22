@@ -1,13 +1,14 @@
 port module Main exposing (main)
 
 import Browser
-import Html exposing (Html, table, tr, th, td, text, button, div, input, br)
+import Html exposing (Html, table, tr, th, td, text, button, div, input, br, h1, h2)
 import Html.Attributes exposing (..)
 import Html.Events exposing (..)
 import Time exposing (..)
 import Json.Decode exposing (float, string, int, decodeValue, map4, field, list)
 import Json.Encode
 import Dict exposing (Dict)
+import Maybe.FlatMap exposing (flatMap)
 
 main =
   Browser.element
@@ -25,13 +26,20 @@ port messageReceiver : (Json.Encode.Value -> msg) -> Sub msg
 
 -- MODEL
 
+type alias HistoryRecord =
+  {
+    price : Float,
+    timestamp: Time.Posix
+  }
+
 type alias Value =
     {
       symbol : String,
       subscribed: Bool,
       current : Maybe Float,
       volume : Maybe Float,
-      timestamp : Maybe Time.Posix
+      timestamp : Maybe Time.Posix,
+      history : Maybe HistoryRecord
     }
 
 newValue : String -> Value
@@ -40,7 +48,8 @@ newValue sym = {
   subscribed = False,
   current = Nothing,
   volume = Nothing,
-  timestamp = Nothing
+  timestamp = Nothing,
+  history = Nothing
   }
 
 type alias State = 
@@ -83,6 +92,7 @@ type Msg
   | Receive Json.Encode.Value
   | TokenChange String
   | UseToken
+  | Tick Time.Posix
 
 addWsLogEntry : List String -> String -> List String
 addWsLogEntry currentLog newEntry = newEntry :: List.take 9 currentLog
@@ -103,7 +113,11 @@ update msg model = case msg of
     ({ model | token = newToken }, Cmd.none)
   UseToken ->
     if String.isEmpty model.token then ( { model | wsLog = addWsLogEntry model.wsLog "ERROR: Empty token" }, Cmd.none) -- FIXME: Show a notification pop-up.
-    else ( { model | wsLog = addWsLogEntry model.wsLog ("Connecting using token: " ++ model.token) } , connectWithToken model.token)
+    else
+      let
+        (initialModel, _) = init ()
+        initialLog = [ "Connecting using token: " ++ model.token ]
+      in ( { initialModel | wsLog = initialLog, token = model.token } , connectWithToken model.token)
   -- Port messages
   Receive json ->
     let jsonAsStr = Json.Encode.encode 0 json
@@ -111,7 +125,13 @@ update msg model = case msg of
       Ok receivedValues ->
         let
           valuesUpdater : Value -> Dict String Value -> Dict String Value
-          valuesUpdater value current = Dict.insert value.symbol value current
+          valuesUpdater value current =
+            let
+              maybeHistory = flatMap (\known -> known.history ) (Dict.get value.symbol current)
+              newHistory = case maybeHistory of
+                  Just h -> Just h
+                  Nothing -> Maybe.map2 (\t -> \p -> { price = p, timestamp = t }) value.timestamp value.current
+            in Dict.insert value.symbol { value | history = newHistory } current
           updated = List.foldl valuesUpdater model.values receivedValues
         in ({model | wsLog = addWsLogEntry model.wsLog jsonAsStr, values = updated}, Cmd.none)
       Err err ->
@@ -120,11 +140,24 @@ update msg model = case msg of
             Json.Decode.Failure problem _ -> problem
             _ -> ""
         in ({model | wsLog = addWsLogEntry model.wsLog ("ERROR: " ++ m ++ " " ++ jsonAsStr)}, Cmd.none)
+  Tick currentTime ->
+    let
+      historyExpiration : String -> Value -> Value
+      historyExpiration _ value =
+        let
+          historyTTL = 1000 -- millis
+          currentMs = posixToMillis currentTime
+          isExpired timeMs = currentMs - historyTTL > timeMs
+        in
+          { value |
+            history = flatMap (\h -> if isExpired (posixToMillis h.timestamp) then Nothing else Just h ) value.history
+          }
+    in ({ model | values = Dict.map historyExpiration model.values }, Cmd.none)
 
 -- SUBSCRIPTIONS
 
 subscriptions : State -> Sub Msg
-subscriptions _ = Sub.batch [ messageReceiver Receive ]
+subscriptions _ = Sub.batch [ messageReceiver Receive, Time.every 500 Tick ]
 
 -- VIEW
 
@@ -142,14 +175,25 @@ timeToUTCStr time =
   ++ " (UTC)"
 
 valueRow : Value -> Html Msg
-valueRow { symbol, current, volume, timestamp } =
-  tr [] [
-    td [] [ text symbol ],
-    td [] [ text (textValue String.fromFloat current) ],
-    td [] [ text (textValue String.fromFloat volume) ],
-    td [] [ text (textValue timeToUTCStr timestamp) ] --,
-    -- td [] [ button [ onClick (Unsubscribe symbol) ] [ text "Unsubscribe" ] ]
-  ]
+valueRow { symbol, current, volume, timestamp, history } =
+  let
+    transparent = "#ffffff00"
+    up = "turquoise"
+    down = "red"
+    priceColor maybePrev maybeCurrent =
+      Maybe.withDefault
+        transparent
+        (Maybe.map2 (\prev -> \c -> if c < prev then down else if c > prev then up else transparent) maybePrev maybeCurrent)
+    color = priceColor (Maybe.map (\h -> h.price) history) current
+  in
+    tr [] [
+      td [] [ text symbol ],
+      td [ style "background-color" color ] [ text (textValue String.fromFloat current) ],
+      td [] [ text (textValue String.fromFloat volume) ],
+      td [] [ text (textValue timeToUTCStr timestamp) ] --,
+      -- td [] [ button [ onClick (Unsubscribe symbol) ] [ text "Unsubscribe" ] ]
+    ]
+
 
 valuesTableHeader : Html Msg
 valuesTableHeader =
@@ -170,7 +214,7 @@ addSymbolView currentSelector =
       input [ value currentSelector, onInput SelectorChange, class "input is-primary" ] []
     ],
     div [ class "control" ] [
-      button [ onClick Subscribe, class "button is-info" ] [ text "Subscribe to symbol" ]
+      button [ onClick Subscribe, class "button is-info" ] [ text "Add symbol" ]
     ]
     ]
 
@@ -193,12 +237,24 @@ tokenView currentToken =
 view : State -> Html Msg
 view { values, symbolSelector, wsLog, token } =
   div [ class "columns" ] [
-    div [ class "column is-one-fifth" ] [
-      tokenView token
+    div [ class "column is-one-third" ] [
+      h1 [ class "title is-2" ] [ text "Stock prices" ],
+      br [] [],
+      h2 [ class "subtitle" ] [
+        text "API Token",
+        br [] [],
+        br [] [],
+        tokenView token
+      ],
+      h2 [ class "subtitle" ] [
+        text "Subscriptions",
+        br [] [],
+        br [] [],
+        addSymbolView symbolSelector
+      ]
     ],
     div [ class "column" ] [
       div [ class "container" ] [
-        addSymbolView symbolSelector,
         valuesTable (List.sortBy (\v -> v.symbol) (Dict.values values)),
         logView wsLog
         ]
@@ -209,7 +265,7 @@ valueDecoder : Json.Decode.Decoder Value
 valueDecoder =
   let
     builder : String -> Float -> Float -> Int -> Value
-    builder symbol price volume millis = Value symbol True (Just price) (Just volume) (Just (Time.millisToPosix millis))
+    builder symbol price volume millis = Value symbol True (Just price) (Just volume) (Just (Time.millisToPosix millis)) Nothing
   in map4 builder
     (field "s" string)
     (field "p" float)
