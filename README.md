@@ -11,6 +11,6 @@ This started and probably will remain as an excercise of exploration of the fron
 
 ```bash
 elm make .\src\Main.elm --output elm.js
-``
+```
 
 3. Open `index.html` using your favorite browser.
